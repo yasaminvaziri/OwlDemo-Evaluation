@@ -17,7 +17,7 @@
  *  
  * Acknowledgement: I thank Henry Lunn and Christopher Newton for kindly reviewing the code
  * 
- * Date: 22 March, 2024.
+ * Date: 1 September, 2025.
  *  
  */
 
@@ -110,6 +110,32 @@ public class EllipticCurveOwlDemo {
     		System.out.println("pi: " + pi.toString(16)); 
     		System.out.println("T: " + pointToHex(T));
     	
+    		/* The server does the following sanity checks before saving {username, pi, T}
+    		 * 1. username is valid, i.e., i) not equal to servername and ii) has not been used (omitted in this demo)
+    		 */
+    		if (userName.equals(serverName)) {
+    			System.out.println("ERROR: Client and Server identities must be different.");
+    			System.exit(0);
+    		}
+    		
+    		/*
+    		 * 2. pi in [1, n-1]
+    		 * Since pi is used as a shared secret in the J-PAKE key exchange part, pi != 0 mod n by definition
+    		 */
+    		if (pi.compareTo(BigInteger.ONE)==-1 || pi.compareTo(n.subtract(BigInteger.ONE)) == 1) {
+    			System.out.println("ERROR: pi is not in the range of [1, n-1]."); 
+    			System.exit(0);
+    		}
+    		
+    		/*
+    		 * 3. T is a valid public key on the curve.
+    		 * This ensures that the discrete logarithm with respect to G exists.
+    		 */
+    		if (!isValidPublicKey(T)) {
+    			System.out.println("ERROR: T is not a valid public key.");
+    			System.exit(0);
+    		}    		
+    		
     		/*
     		 *  Server computes X3 = x3 * G and zkpx3
     		 *  Owl defines x3 in [0, q-1] in the MODP setting, but x3=0 is naturally excluded
@@ -345,8 +371,8 @@ public class EllipticCurveOwlDemo {
     			System.exit(0);
     		}
     			    	
-    		System.out.println("\nClient's session key: " + clientSessionKey.toString(16)); 
-    		System.out.println("Server's session key: " + serverSessionKey.toString(16)); 
+    		System.out.println("\nClient's raw session key: " + clientSessionKey.toString(16)); 
+    		System.out.println("Server's raw session key: " + serverSessionKey.toString(16)); 
     	
     }
 
@@ -410,36 +436,8 @@ public class EllipticCurveOwlDemo {
     		/* ZKP: {V=G*v, r} */    	    	
     		BigInteger h = getSHA256(generator, V, X, userID);
     	
-    		/* Public key validation based on the following paper (Sec 3)
-    		 * Antipa, A., Brown, D., Menezes, A., Struik, R. and Vanstone, S., 
-    		 * "Validation of elliptic curve public keys," PKC, 2002
-    		 * https://iacr.org/archive/pkc2003/25670211/25670211.pdf
-    		 */
-    	
-    		// 1. X != infinity
-    		if (X.isInfinity()){
-    			return false;
-    		}
-    	
-    		// 2. Check x and y coordinates are in Fq, i.e., x, y in [0, q-1]
-    		if (X.normalize().getXCoord().toBigInteger().compareTo(BigInteger.ZERO) == -1 ||
-    			X.normalize().getXCoord().toBigInteger().compareTo(q.subtract(BigInteger.ONE)) == 1 ||
-    			X.normalize().getYCoord().toBigInteger().compareTo(BigInteger.ZERO) == -1 ||
-    			X.normalize().getYCoord().toBigInteger().compareTo(q.subtract(BigInteger.ONE)) == 1) {
-    			return false;
-    		}
-    				
-    		// 3. Check X lies on the curve
-    		try {
-    			ecCurve.decodePoint(X.getEncoded(true));
-    		}catch(Exception e){
-    			e.printStackTrace();
-    			return false;
-    		}
-    	
-    		// 4. Check that nX = infinity.
-    		// It is replaced by the check that coFactor*X is not infinity (i.e., X is not in a small subgroup)
-    		if (X.multiply(coFactor).isInfinity()) { 
+    		// Check X is a valid public key on the designated curve
+    		if (!isValidPublicKey(X)) {
     			return false;
     		}
     	
@@ -451,6 +449,48 @@ public class EllipticCurveOwlDemo {
     			return false;
     		}
     }
+    
+    /*
+     * Returns if a given point is a valid public key on the designated elliptic curve
+     */
+    public boolean isValidPublicKey(ECPoint X) {
+    	
+    	/* Public key validation based on the following paper (Sec 3)
+		 * Antipa, A., Brown, D., Menezes, A., Struik, R. and Vanstone, S., 
+		 * "Validation of elliptic curve public keys," PKC, 2002
+		 * https://iacr.org/archive/pkc2003/25670211/25670211.pdf
+		 */
+			 
+    	// 1. X != infinity
+		if (X.isInfinity()){
+			return false;
+		}
+	
+		// 2. Check x and y coordinates are in Fq, i.e., x, y in [0, q-1]
+		if (X.normalize().getXCoord().toBigInteger().compareTo(BigInteger.ZERO) == -1 ||
+			X.normalize().getXCoord().toBigInteger().compareTo(q.subtract(BigInteger.ONE)) == 1 ||
+			X.normalize().getYCoord().toBigInteger().compareTo(BigInteger.ZERO) == -1 ||
+			X.normalize().getYCoord().toBigInteger().compareTo(q.subtract(BigInteger.ONE)) == 1) {
+			return false;
+		}
+				
+		// 3. Check X lies on the curve
+		try {
+			ecCurve.decodePoint(X.getEncoded(true));
+		}catch(Exception e){
+			e.printStackTrace();
+			return false;
+		}
+	
+		// 4. Check that nX = infinity.
+		// It is replaced by the check that coFactor*X is not infinity (i.e., X is not in a small subgroup)
+		if (X.multiply(coFactor).isInfinity()) { 
+			return false;
+		}
+
+		return true;
+    }
+
     
     /*
      * Represent an integer as 4 bytes
